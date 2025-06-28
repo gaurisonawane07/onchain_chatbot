@@ -10,18 +10,18 @@ async function main() {
     // --- 1. Configuration from .env and requestConfig ---
     const privateKey = process.env.PRIVATE_KEY;
     const rpcUrl = process.env.RPC_URL;
-    const consumerContractAddress = process.env.FUNCTIONS_CONSUMER_CONTRACT_ADDRESS;
+    const consumerContractAddress = requestConfig.consumerContractAddress; // Get from requestConfig, which gets it from .env
 
     if (!privateKey) throw new Error("PRIVATE_KEY not found in .env");
     if (!rpcUrl) throw new Error("RPC_URL not found in .env");
     if (!consumerContractAddress) {
         throw new Error("FUNCTIONS_CONSUMER_CONTRACT_ADDRESS not found in .env. " +
-                        "Please deploy your DeFiAIChatbot contract and add its address to .env.");
+                            "Please deploy your DeFiAIChatbot contract and add its address to .env.");
     }
 
     if (!requestConfig.secrets || requestConfig.secrets.version === undefined || isNaN(requestConfig.secrets.version)) {
         throw new Error("Missing or invalid 'donHostedSecretsVersion' in final-request.js. " +
-                        "Please update it with the version from your upload-secrets.js output.");
+                            "Please update it with the version from your upload-secrets.js output.");
     }
 
     const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
@@ -56,20 +56,43 @@ async function main() {
                     reject(new Error("Chainlink Functions execution failed with undecodable error."));
                 }
             } else {
+                // Robust decoding based on expectedReturnType, with fallback for common cases
+                let decodedResponse;
                 try {
-                    const decodedResponse = ethers.utils.toUtf8String(response);
+                    if (requestConfig.expectedReturnType === "string") {
+                        try {
+                            decodedResponse = ethers.utils.toUtf8String(response);
+                        } catch (e) {
+                            // If string decoding fails, try decoding as uint256, given UI behavior
+                            console.warn("String decoding failed, attempting uint256 decoding...");
+                            decodedResponse = ethers.BigNumber.from(response).toString();
+                            console.warn("Decoded as uint256 due to string decoding failure.");
+                        }
+                    } else if (requestConfig.expectedReturnType === "uint256") {
+                        decodedResponse = ethers.BigNumber.from(response).toString();
+                    } else {
+                        // Fallback for any other unexpected type, try toUtf8String
+                        try {
+                            decodedResponse = ethers.utils.toUtf8String(response);
+                            console.warn(`WARN: Unexpected expectedReturnType: ${requestConfig.expectedReturnType}. Decoded as UTF-8 string.`);
+                        } catch (e) {
+                            decodedResponse = ethers.utils.hexlify(response); // Fallback to raw hex
+                            console.warn(`WARN: Unexpected expectedReturnType: ${requestConfig.expectedReturnType}. Displaying raw hex.`);
+                        }
+                    }
                     console.log(`Decoded Response: ${decodedResponse}`);
                     resolve(decodedResponse);
                 } catch (decodeError) {
-                    console.error("Failed to decode response as UTF-8 string. Raw response:", ethers.utils.hexlify(response));
-                    console.error("Decoding error:", decodeError);
-                    resolve(response);
+                    console.error("Failed to decode response. Raw response:", ethers.utils.hexlify(response));
+                    console.error("Decoding error details:", decodeError.message);
+                    reject(new Error(`Failed to decode result: ${ethers.utils.hexlify(response)}. Error: ${decodeError.message}`));
                 }
             }
         });
     });
 
-    // --- 4. Call the sendRequest function on the contract ---
+
+    // --- 5. Call the sendRequest function on the contract ---
     console.log("Sending Chainlink Functions request via smart contract...");
     const transaction = await consumerContract.sendRequest(
         requestConfig.source,
@@ -85,17 +108,14 @@ async function main() {
     const receipt = await transaction.wait();
     console.log(`Transaction mined in block ${receipt.blockNumber}`);
 
-    // --- 5. Wait for the response event ---
+    // --- 6. Wait for the response event ---
     await responseReceivedPromise;
 
     console.log("Chainlink Functions request process completed.");
 }
 
-// Run the script and ensure a clean exit
+// Run the script
 main().catch((error) => {
     console.error("Script error:", error);
     process.exit(1);
-}).finally(() => {
-    // Ensures the process exits cleanly even if there are unresolved promises or listeners
-    process.exit(0);
 });

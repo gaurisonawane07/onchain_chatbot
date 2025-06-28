@@ -4,10 +4,12 @@ require("dotenv").config();
 const { Location, CodeLanguage } = require("@chainlink/functions-toolkit");
 
 // --- Configuration ---
+
 const consumerContractAddress = process.env.FUNCTIONS_CONSUMER_CONTRACT_ADDRESS;
 if (!consumerContractAddress) {
-  console.warn(
-    "FUNCTIONS_CONSUMER_CONTRACT_ADDRESS not found in .env. Ensure your consumer contract is deployed."
+  // CRITICAL FIX: Throw an error here if address is missing, so it fails early and clearly
+  throw new Error(
+    "FUNCTIONS_CONSUMER_CONTRACT_ADDRESS not found in .env. Ensure your consumer contract is deployed and its address is set in .env."
   );
 }
 
@@ -22,8 +24,12 @@ const functionsSourcePath = path.join(__dirname, "functions-source.js");
 const functionsSource = fs.readFileSync(functionsSourcePath).toString();
 
 // --- Secrets Configuration ---
+// IMPORTANT: Replace these with the exact slotId and version from your
+// successful `upload-secrets.js` script output.
 const secretsSlotId = 0;
-const donHostedSecretsVersion = 1750960986; // <<<--- ENSURE THIS IS YOUR ACTUAL VERSION
+
+// >>> YOU MUST ENSURE THIS IS YOUR ACTUAL VERSION NUMBER <<<
+const donHostedSecretsVersion = 1750960986; // This looks like a valid version number you got from a previous run
 
 if (!donHostedSecretsVersion || isNaN(donHostedSecretsVersion)) {
     throw new Error(
@@ -34,6 +40,8 @@ if (!donHostedSecretsVersion || isNaN(donHostedSecretsVersion)) {
 
 // --- Request Configuration ---
 const requestConfig = {
+  // CRITICAL FIX: Add consumerContractAddress to the exported requestConfig
+  consumerContractAddress: consumerContractAddress, 
   source: functionsSource,
   codeLocation: Location.Inline,
   codeLanguage: CodeLanguage.JavaScript,
@@ -44,14 +52,18 @@ const requestConfig = {
     version: donHostedSecretsVersion,
   },
 
-  // --- CRITICAL FIX: ADD YOUR USER QUERY HERE (MADE SHORTER) ---
-  // This will be passed as args[0] to your functions-source.js
-  args: ["Briefly, what is the current market cap of Ethereum and Bitcoin?"], // <--- Example: Shorter query
+  // --- CRITICAL FIX: PROVIDE YOUR USER QUERY HERE ---
+  // This array carries the string arguments to your functions-source.js
+  // Your functions-source.js likely expects the query as args[0]
+  args: ["Say 'hello'."], // <--- Example: Replace with your actual user query
 
-  expectedReturnType: "string",
+  // --- CRITICAL FIX: SET EXPECTED RETURN TYPE TO STRING ---
+  // A chatbot response will almost certainly be text.
+  expectedReturnType: "string", // <--- Changed from "uint256" to "string"
+
   subscriptionId: Number(subscriptionId),
   donId: donId,
-  callbackGasLimit: 200_000,
+  callbackGasLimit: 300000,
 };
 
 module.exports = requestConfig;
